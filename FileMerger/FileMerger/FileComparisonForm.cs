@@ -56,6 +56,7 @@ namespace FileMerger
             toolTip.SetToolTip(folderAPanel, "Перетащите папку A");
             toolTip.SetToolTip(folderBPanel, "Перетащите папку B");
             toolTip.SetToolTip(compareButton, "Запустить сравнение выбранных папок");
+            toolTip.SetToolTip(verifyMd5CheckBox, "Сравнивать файлы одинакового размера по контрольной сумме MD5");
             toolTip.SetToolTip(searchTextBox, "Фильтр по имени файла или любому пути");
 
             CaptureColumnHeaderTexts();
@@ -183,14 +184,20 @@ namespace FileMerger
 
             compareButton.Enabled = false;
             compareButton.Text = "Сравниваю...";
-            statusLabel.Text = "Идет сравнение файлов.";
+            statusLabel.Text = verifyMd5CheckBox.Checked
+                ? "Идет сравнение файлов по MD5."
+                : "Идет сравнение файлов.";
             Cursor = Cursors.WaitCursor;
 
             try
             {
                 string pathA = folderAPath;
                 string pathB = folderBPath;
-                IReadOnlyList<FileComparisonResult> results = await comparisonService.CompareAsync(pathA, pathB);
+                FileComparisonOptions options = new(verifyMd5CheckBox.Checked);
+                IReadOnlyList<FileComparisonResult> results = await comparisonService.CompareAsync(
+                    pathA,
+                    pathB,
+                    options);
 
                 comparisonResults.Clear();
                 comparisonResults.AddRange(results);

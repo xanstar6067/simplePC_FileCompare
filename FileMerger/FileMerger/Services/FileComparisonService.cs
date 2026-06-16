@@ -20,12 +20,18 @@ namespace FileMerger.Services
             this.fileContentComparisonService = fileContentComparisonService;
         }
 
-        public Task<IReadOnlyList<FileComparisonResult>> CompareAsync(string pathA, string pathB)
+        public Task<IReadOnlyList<FileComparisonResult>> CompareAsync(
+            string pathA,
+            string pathB,
+            FileComparisonOptions options)
         {
-            return Task.Run<IReadOnlyList<FileComparisonResult>>(() => Compare(pathA, pathB));
+            return Task.Run<IReadOnlyList<FileComparisonResult>>(() => Compare(pathA, pathB, options));
         }
 
-        private List<FileComparisonResult> Compare(string pathA, string pathB)
+        private List<FileComparisonResult> Compare(
+            string pathA,
+            string pathB,
+            FileComparisonOptions options)
         {
             Dictionary<string, FileSnapshot> filesA = fileIndexService.Index(pathA);
             Dictionary<string, FileSnapshot> filesB = fileIndexService.Index(pathB);
@@ -61,7 +67,7 @@ namespace FileMerger.Services
                 }
                 else
                 {
-                    status = fileContentComparisonService.Compare(fileA, fileB, out errorMessage);
+                    status = fileContentComparisonService.Compare(fileA, fileB, options, out errorMessage);
                 }
 
                 results.Add(new FileComparisonResult(status, relativePath, fileA, fileB, errorMessage));

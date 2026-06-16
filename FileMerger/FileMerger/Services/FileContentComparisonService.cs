@@ -1,4 +1,5 @@
 using FileMerger.Models;
+using System.Security.Cryptography;
 
 namespace FileMerger.Services
 {
@@ -9,6 +10,7 @@ namespace FileMerger.Services
         public FileComparisonStatus Compare(
             FileSnapshot fileA,
             FileSnapshot fileB,
+            FileComparisonOptions options,
             out string? errorMessage)
         {
             errorMessage = null;
@@ -17,6 +19,18 @@ namespace FileMerger.Services
             {
                 return FileComparisonStatus.Different;
             }
+
+            return options.VerifyMd5Checksum
+                ? CompareMd5(fileA, fileB, out errorMessage)
+                : CompareBytes(fileA, fileB, out errorMessage);
+        }
+
+        private static FileComparisonStatus CompareBytes(
+            FileSnapshot fileA,
+            FileSnapshot fileB,
+            out string? errorMessage)
+        {
+            errorMessage = null;
 
             byte[] bufferA = new byte[BufferSize];
             byte[] bufferB = new byte[BufferSize];
@@ -46,6 +60,32 @@ namespace FileMerger.Services
                         return FileComparisonStatus.Different;
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return FileComparisonStatus.ReadError;
+            }
+        }
+
+        private static FileComparisonStatus CompareMd5(
+            FileSnapshot fileA,
+            FileSnapshot fileB,
+            out string? errorMessage)
+        {
+            errorMessage = null;
+
+            try
+            {
+                using FileStream streamA = File.OpenRead(fileA.FullPath);
+                using FileStream streamB = File.OpenRead(fileB.FullPath);
+
+                byte[] hashA = MD5.HashData(streamA);
+                byte[] hashB = MD5.HashData(streamB);
+
+                return hashA.AsSpan().SequenceEqual(hashB)
+                    ? FileComparisonStatus.Same
+                    : FileComparisonStatus.Different;
             }
             catch (Exception ex)
             {

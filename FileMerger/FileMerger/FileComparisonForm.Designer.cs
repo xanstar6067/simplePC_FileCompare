@@ -51,6 +51,7 @@
             commandPanel = new Panel();
             statusLabel = new Label();
             compareButton = new Button();
+            verifyMd5CheckBox = new CheckBox();
             filterPanel = new FlowLayoutPanel();
             showMissingCheckBox = new CheckBox();
             showDifferentCheckBox = new CheckBox();
@@ -332,6 +333,7 @@
             // 
             commandPanel.Controls.Add(statusLabel);
             commandPanel.Controls.Add(compareButton);
+            commandPanel.Controls.Add(verifyMd5CheckBox);
             commandPanel.Controls.Add(filterPanel);
             commandPanel.Controls.Add(searchPanel);
             commandPanel.Dock = DockStyle.Fill;
@@ -346,10 +348,10 @@
             statusLabel.AutoSize = true;
             statusLabel.Font = new Font("Segoe UI", 9.75F);
             statusLabel.ForeColor = Color.FromArgb(89, 99, 116);
-            statusLabel.Location = new Point(0, 44);
+            statusLabel.Location = new Point(135, 44);
             statusLabel.Name = "statusLabel";
             statusLabel.Size = new Size(199, 17);
-            statusLabel.TabIndex = 3;
+            statusLabel.TabIndex = 4;
             statusLabel.Text = "Выберите две папки для старта.";
             // 
             // compareButton
@@ -365,6 +367,18 @@
             compareButton.TabIndex = 0;
             compareButton.Text = "Сравнить";
             compareButton.UseVisualStyleBackColor = false;
+            //
+            // verifyMd5CheckBox
+            //
+            verifyMd5CheckBox.AutoSize = true;
+            verifyMd5CheckBox.Font = new Font("Segoe UI", 9.75F);
+            verifyMd5CheckBox.ForeColor = Color.FromArgb(49, 58, 73);
+            verifyMd5CheckBox.Location = new Point(0, 43);
+            verifyMd5CheckBox.Name = "verifyMd5CheckBox";
+            verifyMd5CheckBox.Size = new Size(116, 21);
+            verifyMd5CheckBox.TabIndex = 3;
+            verifyMd5CheckBox.Text = "Проверять MD5";
+            verifyMd5CheckBox.UseVisualStyleBackColor = true;
             // 
             // filterPanel
             // 
@@ -732,6 +746,7 @@
         private Panel commandPanel;
         private Label statusLabel;
         private Button compareButton;
+        private CheckBox verifyMd5CheckBox;
         private FlowLayoutPanel filterPanel;
         private CheckBox showMissingCheckBox;
         private CheckBox showDifferentCheckBox;
