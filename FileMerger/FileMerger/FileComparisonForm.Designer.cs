@@ -1,6 +1,6 @@
 ﻿namespace FileMerger
 {
-    partial class Form1
+    partial class FileComparisonForm
     {
         /// <summary>
         ///  Required designer variable.
@@ -29,7 +29,7 @@
         private void InitializeComponent()
         {
             components = new System.ComponentModel.Container();
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(FileComparisonForm));
             toolTip = new ToolTip(components);
             mainLayout = new TableLayoutPanel();
             headerPanel = new Panel();
@@ -672,7 +672,7 @@
             modifiedBColumnHeader.Text = "Изменен B";
             modifiedBColumnHeader.Width = 145;
             // 
-            // Form1
+            // FileComparisonForm
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
             AutoScaleMode = AutoScaleMode.Font;
@@ -681,7 +681,7 @@
             Controls.Add(mainLayout);
             Icon = (Icon)resources.GetObject("$this.Icon");
             MinimumSize = new Size(1040, 680);
-            Name = "Form1";
+            Name = "FileComparisonForm";
             StartPosition = FormStartPosition.CenterScreen;
             Text = "FileMerger - сравнение файлов";
             mainLayout.ResumeLayout(false);

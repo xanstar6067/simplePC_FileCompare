@@ -1,9 +1,15 @@
+using FileMerger.Models;
+using FileMerger.Services;
+using FileMerger.UI;
+
 namespace FileMerger
 {
-    public partial class Form1 : Form
+    public partial class FileComparisonForm : Form
     {
         private const string EmptyFolderText = "Папка не выбрана";
 
+        private readonly IFileComparisonService comparisonService;
+        private readonly FileComparisonListViewItemFactory resultItemFactory = new();
         private readonly List<FileComparisonResult> comparisonResults = new();
         private readonly Dictionary<ColumnHeader, string> columnHeaderTexts = new();
 
@@ -12,8 +18,15 @@ namespace FileMerger
         private int sortColumnIndex = -1;
         private bool sortAscending = true;
 
-        public Form1()
+        public FileComparisonForm()
+            : this(new FileComparisonService())
         {
+        }
+
+        internal FileComparisonForm(IFileComparisonService comparisonService)
+        {
+            this.comparisonService = comparisonService;
+
             InitializeComponent();
             InitializeRuntimeUi();
         }
@@ -69,7 +82,7 @@ namespace FileMerger
 
         private void HandleDragEnter(DragEventArgs e, bool isFolderA)
         {
-            e.Effect = ContainsFolderDrop(e) ? DragDropEffects.Copy : DragDropEffects.None;
+            e.Effect = FolderDropData.ContainsFolder(e) ? DragDropEffects.Copy : DragDropEffects.None;
             SetDropZoneHighlight(isFolderA, e.Effect == DragDropEffects.Copy);
         }
 
@@ -77,7 +90,7 @@ namespace FileMerger
         {
             SetDropZoneHighlight(isFolderA, false);
 
-            string? directory = GetDroppedDirectory(e);
+            string? directory = FolderDropData.GetDirectory(e);
             if (directory is null)
             {
                 statusLabel.Text = "Перетащите именно папку, а не файл.";
@@ -85,26 +98,6 @@ namespace FileMerger
             }
 
             SetFolder(isFolderA, directory);
-        }
-
-        private static bool ContainsFolderDrop(DragEventArgs e)
-        {
-            return GetDroppedDirectory(e) is not null;
-        }
-
-        private static string? GetDroppedDirectory(DragEventArgs e)
-        {
-            if (e.Data is null || !e.Data.GetDataPresent(DataFormats.FileDrop))
-            {
-                return null;
-            }
-
-            string[]? paths = e.Data.GetData(DataFormats.FileDrop) as string[];
-            string? firstPath = paths?.FirstOrDefault();
-
-            return firstPath is not null && Directory.Exists(firstPath)
-                ? firstPath
-                : null;
         }
 
         private void SetDropZoneHighlight(bool isFolderA, bool highlighted)
@@ -136,10 +129,10 @@ namespace FileMerger
         {
             string? normalizedPath = string.IsNullOrWhiteSpace(path)
                 ? null
-                : NormalizeDirectoryPath(path);
+                : DirectoryPathService.Normalize(path);
 
             string? oppositePath = isFolderA ? folderBPath : folderAPath;
-            if (normalizedPath is not null && IsSameDirectory(normalizedPath, oppositePath))
+            if (normalizedPath is not null && DirectoryPathService.AreSame(normalizedPath, oppositePath))
             {
                 statusLabel.Text = isFolderA
                     ? "Эта папка уже выбрана как папка B. Выберите другую папку A."
@@ -176,7 +169,7 @@ namespace FileMerger
                 return;
             }
 
-            if (IsSameDirectory(folderAPath, folderBPath))
+            if (DirectoryPathService.AreSame(folderAPath, folderBPath))
             {
                 statusLabel.Text = "Для сравнения выберите две разные папки.";
                 return;
@@ -197,7 +190,7 @@ namespace FileMerger
             {
                 string pathA = folderAPath;
                 string pathB = folderBPath;
-                List<FileComparisonResult> results = await Task.Run(() => CompareFolders(pathA, pathB));
+                IReadOnlyList<FileComparisonResult> results = await comparisonService.CompareAsync(pathA, pathB);
 
                 comparisonResults.Clear();
                 comparisonResults.AddRange(results);
@@ -218,155 +211,32 @@ namespace FileMerger
             }
         }
 
-        private static List<FileComparisonResult> CompareFolders(string pathA, string pathB)
-        {
-            Dictionary<string, FileSnapshot> filesA = IndexFiles(pathA);
-            Dictionary<string, FileSnapshot> filesB = IndexFiles(pathB);
-            SortedSet<string> allRelativePaths = new(StringComparer.OrdinalIgnoreCase);
-
-            foreach (string relativePath in filesA.Keys)
-            {
-                allRelativePaths.Add(relativePath);
-            }
-
-            foreach (string relativePath in filesB.Keys)
-            {
-                allRelativePaths.Add(relativePath);
-            }
-
-            List<FileComparisonResult> results = new(allRelativePaths.Count);
-
-            foreach (string relativePath in allRelativePaths)
-            {
-                filesA.TryGetValue(relativePath, out FileSnapshot? fileA);
-                filesB.TryGetValue(relativePath, out FileSnapshot? fileB);
-
-                FileComparisonStatus status;
-                string? errorMessage = null;
-
-                if (fileA is null)
-                {
-                    status = FileComparisonStatus.MissingInA;
-                }
-                else if (fileB is null)
-                {
-                    status = FileComparisonStatus.MissingInB;
-                }
-                else
-                {
-                    status = CompareFiles(fileA, fileB, out errorMessage);
-                }
-
-                results.Add(new FileComparisonResult(status, relativePath, fileA, fileB, errorMessage));
-            }
-
-            return results;
-        }
-
-        private static Dictionary<string, FileSnapshot> IndexFiles(string rootPath)
-        {
-            EnumerationOptions options = new()
-            {
-                AttributesToSkip = FileAttributes.ReparsePoint,
-                IgnoreInaccessible = true,
-                RecurseSubdirectories = true,
-                ReturnSpecialDirectories = false
-            };
-
-            Dictionary<string, FileSnapshot> files = new(StringComparer.OrdinalIgnoreCase);
-
-            foreach (string fullPath in Directory.EnumerateFiles(rootPath, "*", options))
-            {
-                FileInfo fileInfo;
-                try
-                {
-                    fileInfo = new FileInfo(fullPath);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                string relativePath = Path.GetRelativePath(rootPath, fullPath);
-                files[relativePath] = new FileSnapshot(
-                    relativePath,
-                    fileInfo.FullName,
-                    fileInfo.Length,
-                    fileInfo.LastWriteTime);
-            }
-
-            return files;
-        }
-
-        private static FileComparisonStatus CompareFiles(
-            FileSnapshot fileA,
-            FileSnapshot fileB,
-            out string? errorMessage)
-        {
-            errorMessage = null;
-
-            if (fileA.Size != fileB.Size)
-            {
-                return FileComparisonStatus.Different;
-            }
-
-            byte[] bufferA = new byte[81920];
-            byte[] bufferB = new byte[81920];
-
-            try
-            {
-                using FileStream streamA = File.OpenRead(fileA.FullPath);
-                using FileStream streamB = File.OpenRead(fileB.FullPath);
-
-                while (true)
-                {
-                    int readA = streamA.Read(bufferA, 0, bufferA.Length);
-                    int readB = streamB.Read(bufferB, 0, bufferB.Length);
-
-                    if (readA != readB)
-                    {
-                        return FileComparisonStatus.Different;
-                    }
-
-                    if (readA == 0)
-                    {
-                        return FileComparisonStatus.Same;
-                    }
-
-                    if (!bufferA.AsSpan(0, readA).SequenceEqual(bufferB.AsSpan(0, readB)))
-                    {
-                        return FileComparisonStatus.Different;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                errorMessage = ex.Message;
-                return FileComparisonStatus.ReadError;
-            }
-        }
-
         private void RefreshResults()
         {
-            int totalCount = comparisonResults.Count;
-            int missingCount = comparisonResults.Count(IsMissing);
-            int differentCount = comparisonResults.Count(result =>
-                result.Status is FileComparisonStatus.Different or FileComparisonStatus.ReadError);
-            int sameCount = comparisonResults.Count(result => result.Status == FileComparisonStatus.Same);
+            ComparisonSummary summary = ComparisonSummaryService.Calculate(comparisonResults);
 
-            totalCountLabel.Text = totalCount.ToString("N0");
-            missingCountLabel.Text = missingCount.ToString("N0");
-            differentCountLabel.Text = differentCount.ToString("N0");
-            sameCountLabel.Text = sameCount.ToString("N0");
+            totalCountLabel.Text = summary.TotalCount.ToString("N0");
+            missingCountLabel.Text = summary.MissingCount.ToString("N0");
+            differentCountLabel.Text = summary.DifferentCount.ToString("N0");
+            sameCountLabel.Text = summary.SameCount.ToString("N0");
 
-            List<FileComparisonResult> filteredResults = ApplySort(comparisonResults.Where(MatchesFilter)).ToList();
+            ComparisonResultFilterOptions filterOptions = new(
+                searchTextBox.Text,
+                showMissingCheckBox.Checked,
+                showDifferentCheckBox.Checked,
+                showAllCheckBox.Checked);
+            ComparisonSortOptions sortOptions = new(sortColumnIndex, sortAscending);
+
+            List<FileComparisonResult> filteredResults = ComparisonResultSorter
+                .Apply(ComparisonResultFilter.Apply(comparisonResults, filterOptions), sortOptions, FileComparisonDisplayText.GetStatusText)
+                .ToList();
 
             resultsListView.BeginUpdate();
             resultsListView.Items.Clear();
 
             foreach (FileComparisonResult result in filteredResults)
             {
-                resultsListView.Items.Add(CreateListViewItem(result));
+                resultsListView.Items.Add(resultItemFactory.Create(result));
             }
 
             resultsListView.EndUpdate();
@@ -374,73 +244,6 @@ namespace FileMerger
             statusLabel.Text = comparisonResults.Count == 0
                 ? "Результатов пока нет."
                 : $"Показано {resultsListView.Items.Count:N0} из {comparisonResults.Count:N0}.";
-        }
-
-        private bool MatchesFilter(FileComparisonResult result)
-        {
-            string searchText = searchTextBox.Text.Trim();
-            if (searchText.Length > 0 && !MatchesSearch(result, searchText))
-            {
-                return false;
-            }
-
-            if (showAllCheckBox.Checked)
-            {
-                return true;
-            }
-
-            if (showMissingCheckBox.Checked && IsMissing(result))
-            {
-                return true;
-            }
-
-            if (showDifferentCheckBox.Checked &&
-                result.Status is FileComparisonStatus.Different or FileComparisonStatus.ReadError)
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool MatchesSearch(FileComparisonResult result, string searchText)
-        {
-            return Contains(result.RelativePath, searchText)
-                || Contains(result.FileA?.FullPath, searchText)
-                || Contains(result.FileB?.FullPath, searchText);
-        }
-
-        private static bool Contains(string? value, string searchText)
-        {
-            return value?.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static bool IsMissing(FileComparisonResult result)
-        {
-            return result.Status is FileComparisonStatus.MissingInA or FileComparisonStatus.MissingInB;
-        }
-
-        private ListViewItem CreateListViewItem(FileComparisonResult result)
-        {
-            string statusText = GetStatusText(result);
-            ListViewItem item = new(statusText);
-            item.SubItems.Add(result.RelativePath);
-            item.SubItems.Add(result.FileA?.FullPath ?? "-");
-            item.SubItems.Add(result.FileB?.FullPath ?? "-");
-            item.SubItems.Add(FormatSize(result.FileA?.Size));
-            item.SubItems.Add(FormatSize(result.FileB?.Size));
-            item.SubItems.Add(FormatDate(result.FileA?.LastWriteTime));
-            item.SubItems.Add(FormatDate(result.FileB?.LastWriteTime));
-            item.Tag = result;
-
-            ApplyStatusStyle(item, result.Status);
-
-            if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
-            {
-                item.ToolTipText = result.ErrorMessage;
-            }
-
-            return item;
         }
 
         private void ResultsListView_ColumnClick(object? sender, ColumnClickEventArgs e)
@@ -485,46 +288,6 @@ namespace FileMerger
             }
         }
 
-        private IEnumerable<FileComparisonResult> ApplySort(IEnumerable<FileComparisonResult> results)
-        {
-            if (sortColumnIndex < 0)
-            {
-                return results;
-            }
-
-            IOrderedEnumerable<FileComparisonResult> orderedResults = sortColumnIndex switch
-            {
-                0 => OrderByValue(results, GetStatusText, StringComparer.OrdinalIgnoreCase),
-                1 => OrderByValue(results, result => result.RelativePath, StringComparer.OrdinalIgnoreCase),
-                2 => OrderByValue(results, result => result.FileA?.FullPath ?? string.Empty, StringComparer.OrdinalIgnoreCase),
-                3 => OrderByValue(results, result => result.FileB?.FullPath ?? string.Empty, StringComparer.OrdinalIgnoreCase),
-                4 => OrderByValue(results, result => result.FileA?.Size),
-                5 => OrderByValue(results, result => result.FileB?.Size),
-                6 => OrderByValue(results, result => result.FileA?.LastWriteTime),
-                7 => OrderByValue(results, result => result.FileB?.LastWriteTime),
-                _ => OrderByValue(results, result => result.RelativePath, StringComparer.OrdinalIgnoreCase)
-            };
-
-            return orderedResults.ThenBy(result => result.RelativePath, StringComparer.OrdinalIgnoreCase);
-        }
-
-        private IOrderedEnumerable<FileComparisonResult> OrderByValue<TKey>(
-            IEnumerable<FileComparisonResult> results,
-            Func<FileComparisonResult, TKey> selector,
-            IComparer<TKey>? comparer = null)
-        {
-            if (comparer is not null)
-            {
-                return sortAscending
-                    ? results.OrderBy(selector, comparer)
-                    : results.OrderByDescending(selector, comparer);
-            }
-
-            return sortAscending
-                ? results.OrderBy(selector)
-                : results.OrderByDescending(selector);
-        }
-
         private void CaptureColumnHeaderTexts()
         {
             columnHeaderTexts.Clear();
@@ -547,70 +310,6 @@ namespace FileMerger
                     ? $"{headerText} {(sortAscending ? "↑" : "↓")}"
                     : headerText;
             }
-        }
-
-        private static string GetStatusText(FileComparisonResult result)
-        {
-            return result.Status switch
-            {
-                FileComparisonStatus.MissingInA => "Нет в A",
-                FileComparisonStatus.MissingInB => "Нет в B",
-                FileComparisonStatus.Different => "Различается",
-                FileComparisonStatus.Same => "Совпадает",
-                FileComparisonStatus.ReadError => "Ошибка чтения",
-                _ => "Неизвестно"
-            };
-        }
-
-        private static void ApplyStatusStyle(ListViewItem item, FileComparisonStatus status)
-        {
-            switch (status)
-            {
-                case FileComparisonStatus.MissingInA:
-                case FileComparisonStatus.MissingInB:
-                    item.BackColor = Color.FromArgb(255, 247, 237);
-                    item.ForeColor = Color.FromArgb(124, 45, 18);
-                    break;
-                case FileComparisonStatus.Different:
-                    item.BackColor = Color.FromArgb(254, 252, 232);
-                    item.ForeColor = Color.FromArgb(113, 63, 18);
-                    break;
-                case FileComparisonStatus.ReadError:
-                    item.BackColor = Color.FromArgb(254, 242, 242);
-                    item.ForeColor = Color.FromArgb(127, 29, 29);
-                    break;
-                case FileComparisonStatus.Same:
-                    item.BackColor = Color.FromArgb(240, 253, 244);
-                    item.ForeColor = Color.FromArgb(20, 83, 45);
-                    break;
-            }
-        }
-
-        private static string FormatSize(long? size)
-        {
-            if (size is null)
-            {
-                return "-";
-            }
-
-            string[] units = { "Б", "КБ", "МБ", "ГБ", "ТБ" };
-            double value = size.Value;
-            int unitIndex = 0;
-
-            while (value >= 1024 && unitIndex < units.Length - 1)
-            {
-                value /= 1024;
-                unitIndex++;
-            }
-
-            return unitIndex == 0
-                ? $"{value:N0} {units[unitIndex]}"
-                : $"{value:N1} {units[unitIndex]}";
-        }
-
-        private static string FormatDate(DateTime? date)
-        {
-            return date?.ToString("dd.MM.yyyy HH:mm") ?? "-";
         }
 
         private void ResetSummary()
@@ -756,24 +455,6 @@ namespace FileMerger
                 .Replace('\t', ' ')
                 .Replace('\r', ' ')
                 .Replace('\n', ' ');
-        }
-
-        private static string NormalizeDirectoryPath(string path)
-        {
-            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
-        }
-
-        private static bool IsSameDirectory(string? firstPath, string? secondPath)
-        {
-            if (firstPath is null || secondPath is null)
-            {
-                return false;
-            }
-
-            return string.Equals(
-                NormalizeDirectoryPath(firstPath),
-                NormalizeDirectoryPath(secondPath),
-                StringComparison.OrdinalIgnoreCase);
         }
 
         private enum PathKind
