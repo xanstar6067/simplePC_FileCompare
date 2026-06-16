@@ -5,9 +5,12 @@ namespace FileMerger
         private const string EmptyFolderText = "Папка не выбрана";
 
         private readonly List<FileComparisonResult> comparisonResults = new();
+        private readonly Dictionary<ColumnHeader, string> columnHeaderTexts = new();
 
         private string? folderAPath;
         private string? folderBPath;
+        private int sortColumnIndex = -1;
+        private bool sortAscending = true;
 
         public Form1()
         {
@@ -31,12 +34,18 @@ namespace FileMerger
             showAllCheckBox.CheckedChanged += (_, _) => RefreshResults();
             searchTextBox.TextChanged += (_, _) => RefreshResults();
             resultsListView.Resize += (_, _) => ResizeResultColumns();
+            resultsListView.ColumnClick += ResultsListView_ColumnClick;
+            resultsListView.KeyDown += ResultsListView_KeyDown;
+            resultsListView.MouseDown += ResultsListView_MouseDown;
+            resultsListView.MultiSelect = true;
+            resultsListView.HideSelection = false;
 
             toolTip.SetToolTip(folderAPanel, "Перетащите папку A");
             toolTip.SetToolTip(folderBPanel, "Перетащите папку B");
             toolTip.SetToolTip(compareButton, "Запустить сравнение выбранных папок");
             toolTip.SetToolTip(searchTextBox, "Фильтр по имени файла или любому пути");
 
+            CaptureColumnHeaderTexts();
             ConfigureResultsContextMenu();
             ResetSummary();
             ResizeResultColumns();
@@ -127,7 +136,16 @@ namespace FileMerger
         {
             string? normalizedPath = string.IsNullOrWhiteSpace(path)
                 ? null
-                : Path.GetFullPath(path);
+                : NormalizeDirectoryPath(path);
+
+            string? oppositePath = isFolderA ? folderBPath : folderAPath;
+            if (normalizedPath is not null && IsSameDirectory(normalizedPath, oppositePath))
+            {
+                statusLabel.Text = isFolderA
+                    ? "Эта папка уже выбрана как папка B. Выберите другую папку A."
+                    : "Эта папка уже выбрана как папка A. Выберите другую папку B.";
+                return;
+            }
 
             if (isFolderA)
             {
@@ -155,6 +173,12 @@ namespace FileMerger
             if (folderAPath is null || folderBPath is null)
             {
                 statusLabel.Text = "Для сравнения нужны обе папки.";
+                return;
+            }
+
+            if (IsSameDirectory(folderAPath, folderBPath))
+            {
+                statusLabel.Text = "Для сравнения выберите две разные папки.";
                 return;
             }
 
@@ -335,7 +359,7 @@ namespace FileMerger
             differentCountLabel.Text = differentCount.ToString("N0");
             sameCountLabel.Text = sameCount.ToString("N0");
 
-            IEnumerable<FileComparisonResult> filteredResults = comparisonResults.Where(MatchesFilter);
+            List<FileComparisonResult> filteredResults = ApplySort(comparisonResults.Where(MatchesFilter)).ToList();
 
             resultsListView.BeginUpdate();
             resultsListView.Items.Clear();
@@ -417,6 +441,112 @@ namespace FileMerger
             }
 
             return item;
+        }
+
+        private void ResultsListView_ColumnClick(object? sender, ColumnClickEventArgs e)
+        {
+            if (sortColumnIndex == e.Column)
+            {
+                sortAscending = !sortAscending;
+            }
+            else
+            {
+                sortColumnIndex = e.Column;
+                sortAscending = true;
+            }
+
+            UpdateSortIndicators();
+            RefreshResults();
+        }
+
+        private void ResultsListView_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.Control && e.KeyCode == Keys.C)
+            {
+                CopySelectedRows();
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        }
+
+        private void ResultsListView_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Right)
+            {
+                return;
+            }
+
+            ListViewItem? clickedItem = resultsListView.GetItemAt(e.X, e.Y);
+            if (clickedItem is not null && !clickedItem.Selected)
+            {
+                resultsListView.SelectedItems.Clear();
+                clickedItem.Selected = true;
+                clickedItem.Focused = true;
+            }
+        }
+
+        private IEnumerable<FileComparisonResult> ApplySort(IEnumerable<FileComparisonResult> results)
+        {
+            if (sortColumnIndex < 0)
+            {
+                return results;
+            }
+
+            IOrderedEnumerable<FileComparisonResult> orderedResults = sortColumnIndex switch
+            {
+                0 => OrderByValue(results, GetStatusText, StringComparer.OrdinalIgnoreCase),
+                1 => OrderByValue(results, result => result.RelativePath, StringComparer.OrdinalIgnoreCase),
+                2 => OrderByValue(results, result => result.FileA?.FullPath ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+                3 => OrderByValue(results, result => result.FileB?.FullPath ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+                4 => OrderByValue(results, result => result.FileA?.Size),
+                5 => OrderByValue(results, result => result.FileB?.Size),
+                6 => OrderByValue(results, result => result.FileA?.LastWriteTime),
+                7 => OrderByValue(results, result => result.FileB?.LastWriteTime),
+                _ => OrderByValue(results, result => result.RelativePath, StringComparer.OrdinalIgnoreCase)
+            };
+
+            return orderedResults.ThenBy(result => result.RelativePath, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private IOrderedEnumerable<FileComparisonResult> OrderByValue<TKey>(
+            IEnumerable<FileComparisonResult> results,
+            Func<FileComparisonResult, TKey> selector,
+            IComparer<TKey>? comparer = null)
+        {
+            if (comparer is not null)
+            {
+                return sortAscending
+                    ? results.OrderBy(selector, comparer)
+                    : results.OrderByDescending(selector, comparer);
+            }
+
+            return sortAscending
+                ? results.OrderBy(selector)
+                : results.OrderByDescending(selector);
+        }
+
+        private void CaptureColumnHeaderTexts()
+        {
+            columnHeaderTexts.Clear();
+
+            foreach (ColumnHeader columnHeader in resultsListView.Columns)
+            {
+                columnHeaderTexts[columnHeader] = columnHeader.Text;
+            }
+        }
+
+        private void UpdateSortIndicators()
+        {
+            foreach (ColumnHeader columnHeader in resultsListView.Columns)
+            {
+                string headerText = columnHeaderTexts.TryGetValue(columnHeader, out string? text)
+                    ? text
+                    : columnHeader.Text;
+
+                columnHeader.Text = columnHeader.Index == sortColumnIndex
+                    ? $"{headerText} {(sortAscending ? "↑" : "↓")}"
+                    : headerText;
+            }
         }
 
         private static string GetStatusText(FileComparisonResult result)
@@ -521,21 +651,25 @@ namespace FileMerger
         private void ConfigureResultsContextMenu()
         {
             ContextMenuStrip menu = new(components);
+            ToolStripMenuItem copySelectedRowsItem = new("Копировать выбранные ячейки");
             ToolStripMenuItem copyRelativePathItem = new("Копировать относительный путь");
             ToolStripMenuItem copyFolderAPathItem = new("Копировать путь A");
             ToolStripMenuItem copyFolderBPathItem = new("Копировать путь B");
 
+            copySelectedRowsItem.Click += (_, _) => CopySelectedRows();
             copyRelativePathItem.Click += (_, _) => CopySelectedPath(PathKind.Relative);
             copyFolderAPathItem.Click += (_, _) => CopySelectedPath(PathKind.FolderA);
             copyFolderBPathItem.Click += (_, _) => CopySelectedPath(PathKind.FolderB);
 
+            menu.Items.Add(copySelectedRowsItem);
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(copyRelativePathItem);
             menu.Items.Add(copyFolderAPathItem);
             menu.Items.Add(copyFolderBPathItem);
             menu.Opening += (_, e) =>
             {
                 FileComparisonResult? result = GetSelectedResult();
-                e.Cancel = result is null;
+                e.Cancel = resultsListView.SelectedItems.Count == 0;
 
                 if (result is not null)
                 {
@@ -575,6 +709,71 @@ namespace FileMerger
                 Clipboard.SetText(path);
                 statusLabel.Text = "Путь скопирован в буфер обмена.";
             }
+        }
+
+        private void CopySelectedRows()
+        {
+            if (resultsListView.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            List<ListViewItem> selectedItems = resultsListView.SelectedItems
+                .Cast<ListViewItem>()
+                .OrderBy(item => item.Index)
+                .ToList();
+
+            List<string> lines = new(selectedItems.Count + 1)
+            {
+                string.Join('\t', resultsListView.Columns
+                    .Cast<ColumnHeader>()
+                    .Select(columnHeader => FormatClipboardCell(GetBaseColumnHeaderText(columnHeader))))
+            };
+
+            foreach (ListViewItem item in selectedItems)
+            {
+                IEnumerable<string> values = item.SubItems
+                    .Cast<ListViewItem.ListViewSubItem>()
+                    .Select(subItem => FormatClipboardCell(subItem.Text));
+
+                lines.Add(string.Join('\t', values));
+            }
+
+            Clipboard.SetText(string.Join(Environment.NewLine, lines));
+            statusLabel.Text = $"Скопировано строк: {selectedItems.Count:N0}.";
+        }
+
+        private string GetBaseColumnHeaderText(ColumnHeader columnHeader)
+        {
+            return columnHeaderTexts.TryGetValue(columnHeader, out string? text)
+                ? text
+                : columnHeader.Text;
+        }
+
+        private static string FormatClipboardCell(string value)
+        {
+            return value
+                .Replace('\t', ' ')
+                .Replace('\r', ' ')
+                .Replace('\n', ' ');
+        }
+
+        private static string NormalizeDirectoryPath(string path)
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path.Trim()));
+        }
+
+        private static bool IsSameDirectory(string? firstPath, string? secondPath)
+        {
+            if (firstPath is null || secondPath is null)
+            {
+                return false;
+            }
+
+            return string.Equals(
+                NormalizeDirectoryPath(firstPath),
+                NormalizeDirectoryPath(secondPath),
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private enum PathKind

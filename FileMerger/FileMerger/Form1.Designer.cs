@@ -623,7 +623,7 @@
             resultsListView.FullRowSelect = true;
             resultsListView.GridLines = true;
             resultsListView.Location = new Point(25, 409);
-            resultsListView.MultiSelect = false;
+            resultsListView.MultiSelect = true;
             resultsListView.Name = "resultsListView";
             resultsListView.Size = new Size(1134, 327);
             resultsListView.TabIndex = 4;
